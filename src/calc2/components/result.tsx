@@ -21,23 +21,20 @@ const maxLinesPerPage = 10;
 type Props = {
 	editorRef: EditorBase,
 	root: RANode,
+	initialResult?: Table | null,
 	numTreeLabelColors: number,
 	execTime?: any,
 	doEliminateDuplicates: boolean
 };
 
 type State = {
-	result: null | Table,
 	activeNode: RANode,
-	execTime: any,
-	doEliminateDuplicates: boolean
 };
 
 export class Result extends React.Component<Props, State> {
 	private result = memoize(
 		(node: RANode, doEliminateDuplicates?: boolean) => {
 			try {
-				node.check();
 				return node.getResult(doEliminateDuplicates);
 			}
 			catch (e) {
@@ -51,9 +48,6 @@ export class Result extends React.Component<Props, State> {
 
 		this.state = {
 			activeNode: props.root,
-			result: null,
-			execTime: null,
-			doEliminateDuplicates: props.doEliminateDuplicates
 		};
 
 		this.setActiveNode = this.setActiveNode.bind(this);
@@ -69,7 +63,9 @@ export class Result extends React.Component<Props, State> {
 		const { editorRef, root, numTreeLabelColors, execTime, doEliminateDuplicates } = this.props;
 		const { activeNode } = this.state;
 
-		const result = this.result(activeNode, doEliminateDuplicates);
+		const result = activeNode === root && typeof this.props.initialResult !== 'undefined'
+			? this.props.initialResult
+			: this.result(activeNode, doEliminateDuplicates);
 		if (result instanceof ExecutionError) {
 			const errorMessage = result.message;
 			editorRef.addExecutionError(errorMessage);

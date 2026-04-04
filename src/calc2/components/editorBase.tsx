@@ -22,7 +22,6 @@ import { toast } from 'react-toastify';
 import { Button, Modal, ModalBody, ModalFooter, ModalHeader, Input } from 'reactstrap';
 import { HotTable } from '@handsontable/react';
 import * as ReactDOM from 'react-dom';
-import memoize from 'memoize-one';
 import html2canvas from 'html2canvas';
 import { 
 	faHistory,
@@ -1659,34 +1658,6 @@ export class EditorBase extends React.Component<Props, State> {
 		}
 	}
 
-
-	getResultForCsv(activeNode: RANode) {
-		const { editor } = this.state;
-		if (!editor) {
-			console.warn(`editor not initialized yet`);
-			return;
-		}
-
-		const result = memoize(
-			(node: RANode, doEliminateDuplicates: boolean) => {
-				try {
-					node.check();
-					// Remove duplicates if using RA strict mode
-					return node.getResult(doEliminateDuplicates);
-				}
-				catch (e) {
-					console.error(e);
-					return null;
-				}
-			},
-		);
-		this.setState({
-			queryResult: result(activeNode, editor.getOption('mode') !== 'bagalg'),
-		});
-		
-	
-	}
-
 	genericHint(cm: CodeMirror.Editor) {
 		const { getHintsFunction } = this.props;
 		const cur = cm.getDoc().getCursor();
@@ -1794,11 +1765,42 @@ export class EditorBase extends React.Component<Props, State> {
 			try {
 				const start = Date.now();
 				const { result } = this.props.execFunction(this, query, offset);
+				let queryResult = null;
+				let raRoot: RANode | null = null;
+				let execResult = result;
+				let execResultElement: React.ReactElement<any> | null = null;
+
+				if (React.isValidElement(result)) {
+					execResultElement = result as React.ReactElement<any>;
+				}
+
+					if (execResultElement) {
+						const resultProps = execResultElement.props as {
+							root?: RANode,
+							doEliminateDuplicates?: boolean,
+						};
+
+						if (resultProps.root instanceof RANode && typeof resultProps.doEliminateDuplicates === 'boolean') {
+							raRoot = resultProps.root;
+							queryResult = raRoot.getResult(resultProps.doEliminateDuplicates);
+							execResult = React.cloneElement(execResultElement, {
+								initialResult: queryResult,
+							});
+						}
+					}
+
 				const end = Date.now() - start;
-				this.getResultForCsv(result.props.root);
+
+				if (execResultElement && raRoot) {
+					execResult = React.cloneElement(execResult as React.ReactElement<any>, {
+						execTime: end,
+					});
+				}
+
 				this.setState({
-					execResult: result,
-					raRoot: result.props.root,
+					execResult,
+					queryResult,
+					raRoot,
 					execTime: end,
 				});
 				const event = new CustomEvent(eventExecSuccessfulName, {
@@ -1812,6 +1814,12 @@ export class EditorBase extends React.Component<Props, State> {
 			}
 			catch (e) {
 				console.error(e, e.stack);
+				this.setState({
+					execResult: null,
+					queryResult: null,
+					raRoot: null,
+					execTime: null,
+				});
 				const error = EditorBase._generateErrorFromException(e, offset.line, offset.ch);
 				this.addExecutionError(error.message, error.codemirrorPositions ? error.codemirrorPositions.from : undefined);
 				if (this.props.enableInlineRelationEditor) {
