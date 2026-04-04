@@ -272,3 +272,95 @@ export abstract class RANodeBinary extends RANode {
 		);
 	}
 }
+
+const htmlEntityMap: { [key: string]: string } = {
+	'&sigma;': 'σ',
+	'&pi;': 'π',
+	'&rho;': 'ρ',
+	'&tau;': 'τ',
+	'&gamma;': 'γ',
+	'&part;': '∂',
+};
+
+const operationTypeMap: { [key: string]: string } = {
+	'&sigma;': 'selection',
+	'&pi;': 'projection',
+	'&rho;': 'rename',
+	'&tau;': 'orderBy',
+	'&gamma;': 'groupBy',
+	'&part;': 'eliminateDuplicates',
+	'⨯': 'crossJoin',
+	'⨝': 'innerJoin',
+	'⟕': 'leftOuterJoin',
+	'⟖': 'rightOuterJoin',
+	'⟗': 'fullOuterJoin',
+	'⋉': 'leftSemiJoin',
+	'⋊': 'rightSemiJoin',
+	'▷': 'antiJoin',
+	'∪': 'union',
+	'∩': 'intersect',
+	'÷': 'division',
+	'-': 'difference',
+};
+
+function decodeHtmlEntities(str: string): string {
+	return str.replace(/&[a-z]+;/g, match => htmlEntityMap[match] || match);
+}
+
+function stripHtmlTags(html: string): string {
+	return html
+		.replace(/<[^>]*>/g, '')
+		.replace(/&amp;/g, '&')
+		.replace(/&lt;/g, '<')
+		.replace(/&gt;/g, '>')
+		.replace(/&quot;/g, '"')
+		.replace(/&#39;/g, "'")
+		.trim();
+}
+
+function schemaToJSON(schema: Schema): { columns: { name: string | number, relAlias: string | null, type: string }[] } {
+	const columns = [];
+	for (let i = 0; i < schema.getSize(); i++) {
+		const col = schema.getColumn(i);
+		columns.push({
+			name: col.getName(),
+			relAlias: col.getRelAlias(),
+			type: schema.getType(i),
+		});
+	}
+	return { columns };
+}
+
+export function raNodeToJSON(node: RANode): object {
+	const functionName = node._functionName;
+
+	const result: any = {};
+
+	if (node instanceof RANodeNullary) {
+		result.operationType = 'relation';
+		result.name = functionName;
+	}
+	else {
+		result.operationType = operationTypeMap[functionName] || functionName;
+		result.operationSymbol = decodeHtmlEntities(functionName);
+	}
+
+	const argumentHtml = node.getArgumentHtml();
+	const args = stripHtmlTags(argumentHtml);
+	if (args.length > 0) {
+		result.arguments = args;
+	}
+
+	result.resultNumRows = node._resultNumRows;
+	result.schema = schemaToJSON(node.getSchema());
+
+	if (node instanceof RANodeBinary) {
+		result.left = raNodeToJSON(node.getChild());
+		result.right = raNodeToJSON(node.getChild2());
+	}
+	else if (node instanceof RANodeUnary) {
+		result.child = raNodeToJSON(node.getChild());
+	}
+
+	return result;
+}
