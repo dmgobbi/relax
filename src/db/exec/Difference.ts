@@ -41,20 +41,20 @@ export class Difference extends RANodeBinary {
 		const orgA = this.getChild().getResult(doEliminateDuplicateRows, session);
 		const orgB = this.getChild2().getResult(doEliminateDuplicateRows, session);
 		res.setSchema(this._schema);
-		let paintedIndexes: (number)[] = [];
+		const paintedIndexes = new Set<number>();
 
 		// copy
 		for (let i = 0; i < orgA.getNumRows(); i++) {
 			const rowA = orgA.getRow(i);
 			let notFound = true;
 			for (let j = 0; j < orgB.getNumRows(); j++) {
-				if (paintedIndexes.indexOf(j) !== -1) {
+				if (paintedIndexes.has(j)) {
 					continue;
 				}
 
 				if (Table.rowEqualsRow(rowA, orgB.getRow(j))) {
 					notFound = false;
-					paintedIndexes.push(j);
+					paintedIndexes.add(j);
 					break;
 				}
 			}

@@ -315,6 +315,22 @@ QUnit.test('test (Bag1) bag intersect (Bag3)', function (assert) {
 	assert.deepEqual(root.getResult(false), ref.getResult(false));
 });
 
+QUnit.test('test (Bag2) bag intersect (Bag1) preserves one-to-one matches', function (assert) {
+	const query = '(Bag2) intersect (Bag1)';
+	const relations = getTestBags();
+	const root = exec_ra(query, relations);
+
+	const ref = exec_ra(`{
+		B.a:number
+
+		1
+		1
+		2
+	}`, relations);
+
+	assert.deepEqual(root.getResult(false), ref.getResult(false));
+});
+
 QUnit.test('test (Bag1) bag difference (Bag3)', function (assert) {
 	const query = '(Bag1) - (Bag3)';
 	const relations = getTestBags();
@@ -323,6 +339,21 @@ QUnit.test('test (Bag1) bag difference (Bag3)', function (assert) {
 	const ref = exec_ra(`{
 		B.a:number
 
+		1
+	}`, relations);
+
+	assert.deepEqual(root.getResult(false), ref.getResult(false));
+});
+
+QUnit.test('test (Bag2) bag difference (Bag1) preserves one-to-one matches', function (assert) {
+	const query = '(Bag2) - (Bag1)';
+	const relations = getTestBags();
+	const root = exec_ra(query, relations);
+
+	const ref = exec_ra(`{
+		B.a:number
+
+		3
 		1
 	}`, relations);
 

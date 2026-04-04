@@ -43,11 +43,11 @@ export class Intersect extends RANodeBinary {
 		const numRowsA = orgA.getNumRows();
 		const numRowsB = orgB.getNumRows();
 		const numCols = orgA.getNumCols();
-		let paintedIndexes: (number)[] = [];
+		const paintedIndexes = new Set<number>();
 		for (let i = 0; i < numRowsA; i++) {
 			const rowA = orgA.getRow(i);
 			for (let j = 0; j < numRowsB; j++) {
-				if (paintedIndexes.indexOf(j) !== -1) {
+				if (paintedIndexes.has(j)) {
 					continue;
 				}
 
@@ -63,7 +63,7 @@ export class Intersect extends RANodeBinary {
 
 				if (equals) {
 					res.addRow(rowA);
-					paintedIndexes.push(j);
+					paintedIndexes.add(j);
 					break;
 				}
 			}
