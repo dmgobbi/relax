@@ -4,7 +4,10 @@
 * License, v. 2.0. If a copy of the MPL was not distributed with this
 * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
+import { Division } from 'db/exec/Division';
 import { Relation } from 'db/exec/Relation';
+import { Session } from 'db/exec/RANode';
+import { Union } from 'db/exec/Union';
 import * as relalgjs from '../relalg';
 
 QUnit.module('translate relational algebra ast to relational algebra');
@@ -51,6 +54,58 @@ function getTestRelations() {
 		R: new Relation('R', R),
 		S: new Relation('S', S),
 		T: new Relation('T', T),
+	};
+}
+
+class CountingRelation extends Relation {
+	numExecutions = 0;
+
+	getResult(doEliminateDuplicateRows: boolean = true, session?: Session) {
+		session = this._returnOrCreateSession(session);
+
+		return this._getMemoizedResult(doEliminateDuplicateRows, session, () => {
+			this.numExecutions++;
+
+			const res = this._table.copy();
+			if (doEliminateDuplicateRows === true) {
+				res.eliminateDuplicateRows();
+			}
+			return res;
+		});
+	}
+}
+
+function getDivisionReproducerRelations() {
+	const srcTableB = exec_ra(`{
+		B.b:string
+
+		b1
+		b2
+		b3
+	}`, {});
+	const srcTableA = exec_ra(`{
+		B.a:string, B.b:string
+
+		'a1', 'b1'
+		'a1', 'b2'
+		'a1', 'b3'
+		'a1', 'b4'
+
+		'a2', 'b1'
+		'a2', 'b3'
+
+		'a3', 'b2'
+		'a3', 'b3'
+		'a3', 'b4'
+
+		'a4', 'b1'
+		'a4', 'b2'
+		'a4', 'b3'
+	}`, {});
+
+	return {
+		A: new Relation('A', srcTableA),
+		B: new Relation('B', srcTableB),
 	};
 }
 
@@ -557,38 +612,26 @@ QUnit.test('test intersect 1', function (assert) {
 	assert.deepEqual(result, ref);
 });
 
+QUnit.test('test shared subtree memoization is scoped per execution', function (assert) {
+	const relations = getTestRelations();
+	const shared = new CountingRelation('R', relations.R);
+	const root = new Union(shared, shared);
+	root.check();
+
+	assert.deepEqual(root.getResult(), relations.R.getResult());
+	assert.equal(shared.numExecutions, 1);
+
+	assert.deepEqual(root.getResult(), relations.R.getResult());
+	assert.equal(shared.numExecutions, 2);
+});
+
 QUnit.test('test division 0', function (assert) {
-	const srcTableB = exec_ra(`{
-		B.b:string
-
-		b1
-		b2
-		b3
-	}`, {});
-	const srcTableA = exec_ra(`{
-		B.a:string, B.b:string
-
-		'a1', 'b1'
-		'a1', 'b2'
-		'a1', 'b3'
-		'a1', 'b4'
-
-		'a2', 'b1'
-		'a2', 'b3'
-
-		'a3', 'b2'
-		'a3', 'b3'
-		'a3', 'b4'
-
-		'a4', 'b1'
-		'a4', 'b2'
-		'a4', 'b3'
-	}`, {});
+	const { A, B } = getDivisionReproducerRelations();
 
 	const query = '(A) ÷ (B)';
 	const root = exec_ra(query, {
-		A: new Relation('A', srcTableA),
-		B: new Relation('B', srcTableB),
+		A,
+		B,
 	});
 
 	const ref = exec_ra(`{
@@ -599,6 +642,26 @@ QUnit.test('test division 0', function (assert) {
 	}`, {});
 
 	assert.deepEqual(root.getResult(), ref.getResult());
+});
+
+QUnit.test('test division memoization only lasts for one execution', function (assert) {
+	const { A, B } = getDivisionReproducerRelations();
+	const sharedLeft = new CountingRelation('A', A);
+	const root = new Division(sharedLeft, B);
+	root.check();
+
+	const ref = exec_ra(`{
+		B.a
+
+		a1
+		a4
+	}`, {});
+
+	assert.deepEqual(root.getResult(), ref.getResult());
+	assert.equal(sharedLeft.numExecutions, 1);
+
+	assert.deepEqual(root.getResult(), ref.getResult());
+	assert.equal(sharedLeft.numExecutions, 2);
 });
 
 QUnit.test('test difference 0', function (assert) {

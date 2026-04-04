@@ -55,42 +55,43 @@ export class Projection extends RANodeUnary {
 			throw new Error(`check has not been called`);
 		}
 
-		const { _indices } = this._checked;
+		return this._getMemoizedResult(doEliminateDuplicateRows, session, () => {
+			const { _indices } = this._checked!;
 
-		if (this._columns === null) {
-			return this._child.getResult(doEliminateDuplicateRows, session);
-		}
-
-		const org = this._child.getResult(doEliminateDuplicateRows, session);
-		const res = new Table();
-		res.setSchema(this.getSchema());
-
-		const numCols = res.getNumCols();
-		const numRows = org.getNumRows();
-
-		let i, j, orgRow, resRow;
-		for (i = 0; i < numRows; i++) {
-			orgRow = org.getRow(i);
-			resRow = new Array(numCols);
-			for (j = 0; j < numCols; j++) {
-				if (_indices[j] === -1) {
-					if (this._columns[j] instanceof Column)
-						resRow[j] = orgRow[j];
-					else
-						resRow[j] = (this._columns[j] as ProjectionColumnExpr).child.evaluate(orgRow, [], i, session);
-				}
-				else {
-					resRow[j] = orgRow[_indices[j]];
-				}
+			if (this._columns === null) {
+				return this._child.getResult(doEliminateDuplicateRows, session);
 			}
-			res.addRow(resRow);
-		}
 
-		if (doEliminateDuplicateRows === true) {
-			res.eliminateDuplicateRows();
-		}
-		this.setResultNumRows(res.getNumRows());
-		return res;
+			const org = this._child.getResult(doEliminateDuplicateRows, session);
+			const res = new Table();
+			res.setSchema(this.getSchema());
+
+			const numCols = res.getNumCols();
+			const numRows = org.getNumRows();
+
+			let i, j, orgRow, resRow;
+			for (i = 0; i < numRows; i++) {
+				orgRow = org.getRow(i);
+				resRow = new Array(numCols);
+				for (j = 0; j < numCols; j++) {
+					if (_indices[j] === -1) {
+						if (this._columns[j] instanceof Column)
+							resRow[j] = orgRow[j];
+						else
+							resRow[j] = (this._columns[j] as ProjectionColumnExpr).child.evaluate(orgRow, [], i, session);
+					}
+					else {
+						resRow[j] = orgRow[_indices[j]];
+					}
+				}
+				res.addRow(resRow);
+			}
+
+			if (doEliminateDuplicateRows === true) {
+				res.eliminateDuplicateRows();
+			}
+			return res;
+		});
 	}
 
 	check() {

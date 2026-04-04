@@ -34,46 +34,47 @@ export class Intersect extends RANodeBinary {
 			throw new Error(`check not called`);
 		}
 
-		const res = new Table();
-		const orgA = this.getChild().getResult(doEliminateDuplicateRows, session);
-		const orgB = this.getChild2().getResult(doEliminateDuplicateRows, session);
-		res.setSchema(this._schema);
+		return this._getMemoizedResult(doEliminateDuplicateRows, session, () => {
+			const res = new Table();
+			const orgA = this.getChild().getResult(doEliminateDuplicateRows, session);
+			const orgB = this.getChild2().getResult(doEliminateDuplicateRows, session);
+			res.setSchema(this._schema!);
 
-		// copy
-		const numRowsA = orgA.getNumRows();
-		const numRowsB = orgB.getNumRows();
-		const numCols = orgA.getNumCols();
-		const paintedIndexes = new Set<number>();
-		for (let i = 0; i < numRowsA; i++) {
-			const rowA = orgA.getRow(i);
-			for (let j = 0; j < numRowsB; j++) {
-				if (paintedIndexes.has(j)) {
-					continue;
-				}
+			// copy
+			const numRowsA = orgA.getNumRows();
+			const numRowsB = orgB.getNumRows();
+			const numCols = orgA.getNumCols();
+			const paintedIndexes = new Set<number>();
+			for (let i = 0; i < numRowsA; i++) {
+				const rowA = orgA.getRow(i);
+				for (let j = 0; j < numRowsB; j++) {
+					if (paintedIndexes.has(j)) {
+						continue;
+					}
 
-				const rowB = orgB.getRow(j);
-				let equals = true;
+					const rowB = orgB.getRow(j);
+					let equals = true;
 
-				for (let k = 0; k < numCols; k++) {
-					if (rowA[k] !== rowB[k]) {
-						equals = false;
+					for (let k = 0; k < numCols; k++) {
+						if (rowA[k] !== rowB[k]) {
+							equals = false;
+							break;
+						}
+					}
+
+					if (equals) {
+						res.addRow(rowA);
+						paintedIndexes.add(j);
 						break;
 					}
 				}
-
-				if (equals) {
-					res.addRow(rowA);
-					paintedIndexes.add(j);
-					break;
-				}
 			}
-		}
 
-		if (doEliminateDuplicateRows === true) {
-			res.eliminateDuplicateRows();
-		}
-		this.setResultNumRows(res.getNumRows());
-		return res;
+			if (doEliminateDuplicateRows === true) {
+				res.eliminateDuplicateRows();
+			}
+			return res;
+		});
 	}
 
 	check(): void {

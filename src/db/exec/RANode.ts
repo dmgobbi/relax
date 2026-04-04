@@ -16,6 +16,7 @@ export interface Warning {
 }
 export interface Session {
 	statement_timestamp: Date,
+	resultCache: Map<string, Table>,
 }
 export interface MetaData extends Object {
 	naturalJoinConditions?: ValueExpr[],
@@ -36,14 +37,16 @@ export interface MetaData extends Object {
  *   The `check()` function also calculates the output schema for the specific
  *   operator.
  * - after check has been called the actual result is calculated when `getResult()` is called
- *   the results are not cached and return a new of Table that is independant of the results
- *   of their operands
+ *   results may be memoized within the current execution session, but each
+ *   caller still receives an independent Table object
  *   the session object is created automatically at the root of the tree
  * @constructor
  * @abstract
  * @returns {RANode} this is an abstract class
  */
 export abstract class RANode {
+	private static _nextMemoizationId = 0;
+
 	_functionName: string;
 	_codeInfo: CodeInfo | null = null;
 	_metaData: MetaData = {};
@@ -51,9 +54,11 @@ export abstract class RANode {
 	_wrappedInParentheses: boolean = false;
 	_warnings: Warning[] = [];
 	_execTime: any;
+	private _memoizationId: number;
 	
 	constructor(functionName = '') {
 		this._functionName = functionName;
+		this._memoizationId = RANode._nextMemoizationId++;
 	}
 
 	setCodeInfoObject(codeInfo: CodeInfo | null) {
@@ -140,11 +145,27 @@ export abstract class RANode {
 			// create a new session
 			return {
 				statement_timestamp: new Date(),
+				resultCache: new Map<string, Table>(),
 			};
 		}
 		else {
 			return session;
 		}
+	}
+
+	protected _getMemoizedResult(doEliminateDuplicateRows: boolean, session: Session, calculateResult: () => Table): Table {
+		const key = `${this._memoizationId}:${doEliminateDuplicateRows === true ? 1 : 0}`;
+		const cachedResult = session.resultCache.get(key);
+		if (cachedResult !== undefined) {
+			const result = cachedResult.copy();
+			this.setResultNumRows(result.getNumRows());
+			return result;
+		}
+
+		const result = calculateResult();
+		session.resultCache.set(key, result.copy());
+		this.setResultNumRows(result.getNumRows());
+		return result;
 	}
 
 	getArgumentHtml(): string {

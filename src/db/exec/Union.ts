@@ -39,20 +39,21 @@ export class Union extends RANodeBinary {
 			throw new Error(`check not called`);
 		}
 
-		const res = new Table();
-		const orgA = this.getChild().getResult(doEliminateDuplicateRows, session);
-		const orgB = this.getChild2().getResult(doEliminateDuplicateRows, session);
-		res.setSchema(this._schema);
+		return this._getMemoizedResult(doEliminateDuplicateRows, session, () => {
+			const res = new Table();
+			const orgA = this.getChild().getResult(doEliminateDuplicateRows, session);
+			const orgB = this.getChild2().getResult(doEliminateDuplicateRows, session);
+			res.setSchema(this._schema!);
 
-		// copy
-		res.addRows(orgA.getRows());
-		res.addRows(orgB.getRows());
+			// copy
+			res.addRows(orgA.getRows());
+			res.addRows(orgB.getRows());
 
-		if (doEliminateDuplicateRows === true) {
-			res.eliminateDuplicateRows();
-		}
-		this.setResultNumRows(res.getNumRows());
-		return res;
+			if (doEliminateDuplicateRows === true) {
+				res.eliminateDuplicateRows();
+			}
+			return res;
+		});
 	}
 
 	check() {

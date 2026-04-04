@@ -103,11 +103,11 @@ export class RenameColumns extends RANodeUnary {
     getResult(doEliminateDuplicateRows: boolean = true, session?: Session) {
         session = this._returnOrCreateSession(session);
 
-        const res = this._child.getResult(doEliminateDuplicateRows, session).copy();
-        res.setSchema(this.getSchema());
-
-        this.setResultNumRows(res.getNumRows());
-        return res;
+        return this._getMemoizedResult(doEliminateDuplicateRows, session, () => {
+            const res = this._child.getResult(doEliminateDuplicateRows, session).copy();
+            res.setSchema(this.getSchema());
+            return res;
+        });
     }
 
     getArgumentHtml() {

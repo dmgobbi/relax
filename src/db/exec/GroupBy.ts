@@ -289,182 +289,183 @@ export class GroupBy extends RANodeUnary {
 			throw new Error(`check not called`);
 		}
 
-		const org = this.getChild().getResult(doEliminateDuplicateRows, session);
-		const res = new Table();
-		res.setSchema(this.checked.schema);
+		return this._getMemoizedResult(doEliminateDuplicateRows, session, () => {
+			const org = this.getChild().getResult(doEliminateDuplicateRows, session);
+			const res = new Table();
+			res.setSchema(this.checked!.schema);
 
-		const hasGroupCols = this.groupByCols.length > 0;
-		let groupsOfRows; // might be sparsely filled
-		let numberOfGroups = 0; // === number of rows in result table
+			const hasGroupCols = this.groupByCols.length > 0;
+			let groupsOfRows; // might be sparsely filled
+			let numberOfGroups = 0; // === number of rows in result table
 
-		if (hasGroupCols) {
-			const hashTable: {
-				[key: string]: {
-					rows: Tuple[],
-					resultTuple: Tuple,
-					rownumber: number,
-				},
-			} = {};
+			if (hasGroupCols) {
+				const hashTable: {
+					[key: string]: {
+						rows: Tuple[],
+						resultTuple: Tuple,
+						rownumber: number,
+					},
+				} = {};
 
-			for (let i = 0; i < org.getNumRows(); i++) {
-				const row = org.getRow(i);
-            const keyTuple: any[] = new Array(this.checked.groupByColumnIndices.length);
+				for (let i = 0; i < org.getNumRows(); i++) {
+					const row = org.getRow(i);
+					const keyTuple: any[] = new Array(this.checked!.groupByColumnIndices.length);
 
-				for (let j = 0; j < this.checked.groupByColumnIndices.length; j++) {
-					keyTuple[j] = row[this.checked.groupByColumnIndices[j]];
-				}
+					for (let j = 0; j < this.checked!.groupByColumnIndices.length; j++) {
+						keyTuple[j] = row[this.checked!.groupByColumnIndices[j]];
+					}
 
-				const key = JSON.stringify(keyTuple);
-				if (typeof (hashTable[key]) !== 'undefined') {
-					hashTable[key].rows.push(row);
-				}
-				else {
-					hashTable[key] = {
-						rows: [row],
-						resultTuple: keyTuple,
-						rownumber: i,
-					};
-					numberOfGroups++;
-				}
-			}
-
-			groupsOfRows = new Array(org.getNumRows()); // sparsely filled
-
-			// write hashtable into sparsely filled array to preserve ordering
-			let entry;
-			for (const key in hashTable) {
-				if (!hashTable.hasOwnProperty(key)) {
-					continue;
-				}
-
-				entry = hashTable[key];
-				groupsOfRows[entry.rownumber] = entry;
-			}
-
-		}
-		else { // no grouping attributes => entire relation is one group
-			numberOfGroups = 1;
-			groupsOfRows = new Array(numberOfGroups);
-
-			groupsOfRows[0] = {
-				rows: org.getRows(),
-				resultTuple: [],
-			};
-
-		}
-
-
-		// min and max for strings, numbers and dates
-		const genericMin = function (a: string | number | Date, b: string | number | Date) {
-			if (a < b) {
-				return a;
-			}
-			return b;
-		};
-		const genericMax = function (a: string | number | Date, b: string | number | Date) {
-			if (a > b) {
-				return a;
-			}
-			return b;
-		};
-
-
-		// execute aggregate functions
-		let aggValue, group, value;
-		let entry;
-		for (let h = 0; h < groupsOfRows.length; h++) {
-			if (!groupsOfRows[h]) {
-				continue;
-			} // skip unfilled rows
-
-			entry = groupsOfRows[h];
-			group = entry.rows;
-
-			for (let i = 0; i < this.aggregateFunctions.length; i++) {
-				const func = this.aggregateFunctions[i];
-				const funcColIndex = this.checked.aggregateFunctionsColIndex[i];
-
-				if (func.aggFunction === 'COUNT_ALL') {
-					aggValue = group.length;
-				}
-				else {
-					// var colType = this._child.getSchema().getType(func.colIndex);
-					switch (func.aggFunction) {
-						case 'COUNT':
-							aggValue = 0;
-
-							for (let j = 0; j < group.length; j++) {
-								value = group[j][funcColIndex];
-								if (value !== null) {
-									aggValue++;
-								}
-							}
-
-							break;
-
-						case 'MIN':
-						case 'MAX':
-							aggValue = null;
-							const c = func.aggFunction === 'MIN' ? genericMin : genericMax;
-
-							for (let j = 0; j < group.length; j++) {
-								value = group[j][funcColIndex];
-								if (aggValue === null) {
-									aggValue = value;
-								}
-								else {
-									aggValue = c(aggValue, value);
-								}
-							}
-
-							break;
-
-						case 'AVG':
-						case 'SUM':
-							let sum = 0;
-							let counter = 0;
-
-							for (let j = 0; j < group.length; j++) {
-								value = group[j][funcColIndex];
-								if (value !== null) {
-									sum += value;
-									counter++;
-								}
-							}
-
-							if (counter === 0) {
-								aggValue = null;
-							}
-							else if (func.aggFunction === 'SUM') {
-								aggValue = sum;
-							}
-							else { // AVG
-								aggValue = sum / counter;
-							}
-
-							break;
-
-						default:
-							throw new Error('this should not happen');
+					const key = JSON.stringify(keyTuple);
+					if (typeof (hashTable[key]) !== 'undefined') {
+						hashTable[key].rows.push(row);
+					}
+					else {
+						hashTable[key] = {
+							rows: [row],
+							resultTuple: keyTuple,
+							rownumber: i,
+						};
+						numberOfGroups++;
 					}
 				}
-				entry.resultTuple.push(aggValue);
+
+				groupsOfRows = new Array(org.getNumRows()); // sparsely filled
+
+				// write hashtable into sparsely filled array to preserve ordering
+				let entry;
+				for (const key in hashTable) {
+					if (!hashTable.hasOwnProperty(key)) {
+						continue;
+					}
+
+					entry = hashTable[key];
+					groupsOfRows[entry.rownumber] = entry;
+				}
+
+			}
+			else { // no grouping attributes => entire relation is one group
+				numberOfGroups = 1;
+				groupsOfRows = new Array(numberOfGroups);
+
+				groupsOfRows[0] = {
+					rows: org.getRows(),
+					resultTuple: [],
+				};
+
 			}
 
-		}
 
-		// write into result-table
-		for (let i = 0; i < groupsOfRows.length; i++) {
-			if (!groupsOfRows[i]) {
-				continue;
+			// min and max for strings, numbers and dates
+			const genericMin = function (a: string | number | Date, b: string | number | Date) {
+				if (a < b) {
+					return a;
+				}
+				return b;
+			};
+			const genericMax = function (a: string | number | Date, b: string | number | Date) {
+				if (a > b) {
+					return a;
+				}
+				return b;
+			};
+
+
+			// execute aggregate functions
+			let aggValue, group, value;
+			let entry;
+			for (let h = 0; h < groupsOfRows.length; h++) {
+				if (!groupsOfRows[h]) {
+					continue;
+				} // skip unfilled rows
+
+				entry = groupsOfRows[h];
+				group = entry.rows;
+
+				for (let i = 0; i < this.aggregateFunctions.length; i++) {
+					const func = this.aggregateFunctions[i];
+					const funcColIndex = this.checked!.aggregateFunctionsColIndex[i];
+
+					if (func.aggFunction === 'COUNT_ALL') {
+						aggValue = group.length;
+					}
+					else {
+						// var colType = this._child.getSchema().getType(func.colIndex);
+						switch (func.aggFunction) {
+							case 'COUNT':
+								aggValue = 0;
+
+								for (let j = 0; j < group.length; j++) {
+									value = group[j][funcColIndex];
+									if (value !== null) {
+										aggValue++;
+									}
+								}
+
+								break;
+
+							case 'MIN':
+							case 'MAX':
+								aggValue = null;
+								const c = func.aggFunction === 'MIN' ? genericMin : genericMax;
+
+								for (let j = 0; j < group.length; j++) {
+									value = group[j][funcColIndex];
+									if (aggValue === null) {
+										aggValue = value;
+									}
+									else {
+										aggValue = c(aggValue, value);
+									}
+								}
+
+								break;
+
+							case 'AVG':
+							case 'SUM':
+								let sum = 0;
+								let counter = 0;
+
+								for (let j = 0; j < group.length; j++) {
+									value = group[j][funcColIndex];
+									if (value !== null) {
+										sum += value;
+										counter++;
+									}
+								}
+
+								if (counter === 0) {
+									aggValue = null;
+								}
+								else if (func.aggFunction === 'SUM') {
+									aggValue = sum;
+								}
+								else { // AVG
+									aggValue = sum / counter;
+								}
+
+								break;
+
+							default:
+								throw new Error('this should not happen');
+						}
+					}
+					entry.resultTuple.push(aggValue);
+				}
+
 			}
-			res.addRow(groupsOfRows[i].resultTuple);
-		}
 
-		if (doEliminateDuplicateRows === true) {
-			res.eliminateDuplicateRows();
-		}
-		this.setResultNumRows(res.getNumRows());
-		return res;
+			// write into result-table
+			for (let i = 0; i < groupsOfRows.length; i++) {
+				if (!groupsOfRows[i]) {
+					continue;
+				}
+				res.addRow(groupsOfRows[i].resultTuple);
+			}
+
+			if (doEliminateDuplicateRows === true) {
+				res.eliminateDuplicateRows();
+			}
+			return res;
+		});
 	}
 }

@@ -263,71 +263,69 @@ export abstract class Join extends RANodeBinary {
 			throw new Error(`check not called`);
 		}
 
-		const resultTable = new Table();
-		resultTable.setSchema(this.getSchema());
-		this._executionStart = Date.now();
+		return this._getMemoizedResult(doEliminateDuplicateRows, session, () => {
+			const resultTable = new Table();
+			resultTable.setSchema(this.getSchema());
+			this._executionStart = Date.now();
 
-		Join.calcNestedLoopJoin(
-			doEliminateDuplicateRows,
-			session,
-			this.getChild(),
-			this.getChild2(),
-			resultTable,
-			this._isRightJoin,
-			this._isAntiJoin,
-			this._joinConditionEvaluator,
-			this._rowCreatorMatched,
-			this._rowCreatorNotMatched,
-		);
+			Join.calcNestedLoopJoin(
+				doEliminateDuplicateRows,
+				session!,
+				this.getChild(),
+				this.getChild2(),
+				resultTable,
+				this._isRightJoin,
+				this._isAntiJoin,
+				this._joinConditionEvaluator!,
+				this._rowCreatorMatched,
+				this._rowCreatorNotMatched,
+			);
 
-		// can be omitted if join is known to produce no new duplicates (e.g semi join) 
-		if (doEliminateDuplicateRows === true) {
-			resultTable.eliminateDuplicateRows();
-		}
+			// can be omitted if join is known to produce no new duplicates (e.g semi join) 
+			if (doEliminateDuplicateRows === true) {
+				resultTable.eliminateDuplicateRows();
+			}
 
-		this.setResultNumRows(resultTable.getNumRows());
+			// If it is a semi join on bag/multiset mode
+			if ((this._functionName === '⋉' || this._functionName === '⋊') &&
+				doEliminateDuplicateRows !== true) {
+				const newResultTable = new Table();
+				newResultTable.setSchema(this.getSchema());
+				const orgA = this._isRightJoin ?
+					this.getChild2().getResult(doEliminateDuplicateRows, session) :
+					this.getChild().getResult(doEliminateDuplicateRows, session);
+				const orgB = resultTable;
+				const numRowsA = orgA.getNumRows();
+				const numRowsB = orgB.getNumRows();
+				const numCols = orgA.getNumCols();
+				for (let i = 0; i < numRowsA; i++) {
+					const rowA = orgA.getRow(i);
+					for (let j = 0; j < numRowsB; j++) {
+						const rowB = orgB.getRow(j);
+						let equals = true;
 
-		// If it is a semi join on bag/multiset mode
-		if ((this._functionName === '⋉' || this._functionName === '⋊') &&
-			doEliminateDuplicateRows !== true) {
-			const newResultTable = new Table();
-			newResultTable.setSchema(this.getSchema());
-			const orgA = this._isRightJoin ?
-				this.getChild2().getResult(doEliminateDuplicateRows, session) :
-				this.getChild().getResult(doEliminateDuplicateRows, session);
-			const orgB = resultTable;
-			const numRowsA = orgA.getNumRows();
-			const numRowsB = orgB.getNumRows();
-			const numCols = orgA.getNumCols();
-			for (let i = 0; i < numRowsA; i++) {
-				const rowA = orgA.getRow(i);
-				for (let j = 0; j < numRowsB; j++) {
-					const rowB = orgB.getRow(j);
-					let equals = true;
-
-					for (let k = 0; k < numCols; k++) {
-						if (rowA[k] !== rowB[k]) {
-							equals = false;
+						for (let k = 0; k < numCols; k++) {
+							if (rowA[k] !== rowB[k]) {
+								equals = false;
+								break;
+							}
+						}
+	
+						if (equals) {
+							newResultTable.addRow(rowA);
 							break;
 						}
 					}
-	
-					if (equals) {
-						newResultTable.addRow(rowA);
-						break;
-					}
 				}
+
+				this._executedEnd = Date.now() - this._executionStart;
+				return newResultTable;
 			}
 
-			this.setResultNumRows(newResultTable.getNumRows());
-			this._executedEnd = Date.now() - this._executionStart;
-			return newResultTable;
-		}
-		else {
 			// Regular path
 			this._executedEnd = Date.now() - this._executionStart;
 			return resultTable;
-		}
+		});
 	}
 
 

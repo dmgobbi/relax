@@ -35,13 +35,14 @@ export class Division extends RANodeBinary {
 			throw new Error(`check not called`);
 		}
 
-		const res = this._delegate.getResult(doEliminateDuplicateRows, session);
+		return this._getMemoizedResult(doEliminateDuplicateRows, session, () => {
+			const res = this._delegate!.getResult(doEliminateDuplicateRows, session);
 
-		if (doEliminateDuplicateRows === true) {
-			res.eliminateDuplicateRows();
-		}
-		this.setResultNumRows(res.getNumRows());
-		return res;
+			if (doEliminateDuplicateRows === true) {
+				res.eliminateDuplicateRows();
+			}
+			return res;
+		});
 	}
 
 	check() {

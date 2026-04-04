@@ -33,23 +33,24 @@ export class Selection extends RANodeUnary {
 
 	getResult(doEliminateDuplicateRows: boolean = true, session?: Session) {
 		session = this._returnOrCreateSession(session);
-		const res = new Table();
-		const org = this.getChild().getResult(doEliminateDuplicateRows, session);
-		res.setSchema(org.getSchema());
+		return this._getMemoizedResult(doEliminateDuplicateRows, session, () => {
+			const res = new Table();
+			const org = this.getChild().getResult(doEliminateDuplicateRows, session);
+			res.setSchema(org.getSchema());
 
-		// copy
-		const condition = this._condition;
-		const numRows = org.getNumRows();
-		for (let i = 0; i < numRows; i++) {
-			const row = org.getRow(i);
+			// copy
+			const condition = this._condition;
+			const numRows = org.getNumRows();
+			for (let i = 0; i < numRows; i++) {
+				const row = org.getRow(i);
 
-			if (condition.evaluate(row, [], i, session) === true) {
-				res.addRow(row);
+				if (condition.evaluate(row, [], i, session) === true) {
+					res.addRow(row);
+				}
 			}
-		}
 
-		this.setResultNumRows(res.getNumRows());
-		return res;
+			return res;
+		});
 	}
 
 	check() {

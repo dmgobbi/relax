@@ -55,15 +55,16 @@ export class Relation extends RANodeNullary {
 	}
 
 	getResult(doEliminateDuplicateRows: boolean = true, session?: Session) {
-		this._returnOrCreateSession(session);
+		session = this._returnOrCreateSession(session);
 
-		const res = this._table.copy();
+		return this._getMemoizedResult(doEliminateDuplicateRows, session, () => {
+			const res = this._table.copy();
 
-		if (doEliminateDuplicateRows === true) {
-			res.eliminateDuplicateRows();
-		}
-		this.setResultNumRows(res.getNumRows());
-		return res;
+			if (doEliminateDuplicateRows === true) {
+				res.eliminateDuplicateRows();
+			}
+			return res;
+		});
 	}
 
 	getSchema() {

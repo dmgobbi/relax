@@ -37,38 +37,39 @@ export class Difference extends RANodeBinary {
 			throw new Error(`check not called`);
 		}
 
-		const res = new Table();
-		const orgA = this.getChild().getResult(doEliminateDuplicateRows, session);
-		const orgB = this.getChild2().getResult(doEliminateDuplicateRows, session);
-		res.setSchema(this._schema);
-		const paintedIndexes = new Set<number>();
+		return this._getMemoizedResult(doEliminateDuplicateRows, session, () => {
+			const res = new Table();
+			const orgA = this.getChild().getResult(doEliminateDuplicateRows, session);
+			const orgB = this.getChild2().getResult(doEliminateDuplicateRows, session);
+			res.setSchema(this._schema!);
+			const paintedIndexes = new Set<number>();
 
-		// copy
-		for (let i = 0; i < orgA.getNumRows(); i++) {
-			const rowA = orgA.getRow(i);
-			let notFound = true;
-			for (let j = 0; j < orgB.getNumRows(); j++) {
-				if (paintedIndexes.has(j)) {
-					continue;
+			// copy
+			for (let i = 0; i < orgA.getNumRows(); i++) {
+				const rowA = orgA.getRow(i);
+				let notFound = true;
+				for (let j = 0; j < orgB.getNumRows(); j++) {
+					if (paintedIndexes.has(j)) {
+						continue;
+					}
+
+					if (Table.rowEqualsRow(rowA, orgB.getRow(j))) {
+						notFound = false;
+						paintedIndexes.add(j);
+						break;
+					}
 				}
 
-				if (Table.rowEqualsRow(rowA, orgB.getRow(j))) {
-					notFound = false;
-					paintedIndexes.add(j);
-					break;
+				if (notFound) {
+					res.addRow(rowA);
 				}
 			}
 
-			if (notFound) {
-				res.addRow(rowA);
+			if (doEliminateDuplicateRows === true) {
+				res.eliminateDuplicateRows();
 			}
-		}
-
-		if (doEliminateDuplicateRows === true) {
-			res.eliminateDuplicateRows();
-		}
-		this.setResultNumRows(res.getNumRows());
-		return res;
+			return res;
+		});
 	}
 
 	check() {

@@ -46,14 +46,15 @@ export class OrderBy extends RANodeUnary {
 			throw new Error(`check not called`);
 		}
 
-		const res = this.getChild().getResult(doEliminateDuplicateRows, session).copy();
-		if (doEliminateDuplicateRows === true) {
-			res.eliminateDuplicateRows();
-		}
-		this.setResultNumRows(res.getNumRows());
+		return this._getMemoizedResult(doEliminateDuplicateRows, session, () => {
+			const res = this.getChild().getResult(doEliminateDuplicateRows, session).copy();
+			if (doEliminateDuplicateRows === true) {
+				res.eliminateDuplicateRows();
+			}
 
-		res.sort(this._orderIndices, this._orderAsc);
-		return res;
+			res.sort(this._orderIndices!, this._orderAsc);
+			return res;
+		});
 	}
 
 	check(): void {

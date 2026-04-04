@@ -64,42 +64,43 @@ export class FullOuterJoin extends Join {
 			throw new Error(`check not called`);
 		}
 
-		const resultTable = new Table();
-		resultTable.setSchema(this.getSchema());
+		return this._getMemoizedResult(doEliminateDuplicateRows, session, () => {
+			const resultTable = new Table();
+			resultTable.setSchema(this.getSchema());
 
-		// left join
-		Join.calcNestedLoopJoin(
-			doEliminateDuplicateRows,
-			session,
-			this.getChild(), this.getChild2(),
-			resultTable,
-			false,
-			false,
-			this._joinConditionEvaluator,
-			this._rowCreatorMatched,
-			this._rowCreatorNotMatched,
-		);
+			// left join
+			Join.calcNestedLoopJoin(
+				doEliminateDuplicateRows,
+				session!,
+				this.getChild(), this.getChild2(),
+				resultTable,
+				false,
+				false,
+				this._joinConditionEvaluator!,
+				this._rowCreatorMatched!,
+				this._rowCreatorNotMatched!,
+			);
 
-		// right join
-		Join.calcNestedLoopJoin(
-			doEliminateDuplicateRows,
-			session,
-			this.getChild(), this.getChild2(),
-			resultTable,
-			true,
-			false,
-			this._joinConditionEvaluator,
-			// Should not create matched rows twice in case of a multiset (left join already did the job)
-			// this._rowCreatorMatched,	
-			null,
-			this._rowCreatorNotMatched,
-		);
+			// right join
+			Join.calcNestedLoopJoin(
+				doEliminateDuplicateRows,
+				session!,
+				this.getChild(), this.getChild2(),
+				resultTable,
+				true,
+				false,
+				this._joinConditionEvaluator!,
+				// Should not create matched rows twice in case of a multiset (left join already did the job)
+				// this._rowCreatorMatched,	
+				null,
+				this._rowCreatorNotMatched!,
+			);
 
-		if (doEliminateDuplicateRows === true) {
-			resultTable.eliminateDuplicateRows();
-		}
-		this.setResultNumRows(resultTable.getNumRows());
+			if (doEliminateDuplicateRows === true) {
+				resultTable.eliminateDuplicateRows();
+			}
 
-		return resultTable;
+			return resultTable;
+		});
 	}
 }
