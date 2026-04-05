@@ -34,7 +34,7 @@ export class Selection extends RANodeUnary {
 	getResult(doEliminateDuplicateRows: boolean = true, session?: Session) {
 		session = this._returnOrCreateSession(session);
 		return this._getMemoizedResult(doEliminateDuplicateRows, session, () => {
-			const res = new Table();
+			const res = this._createResultTable(session);
 			const org = this.getChild().getResult(doEliminateDuplicateRows, session);
 			res.setSchema(org.getSchema());
 

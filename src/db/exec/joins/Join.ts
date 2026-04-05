@@ -264,13 +264,17 @@ export abstract class Join extends RANodeBinary {
 		}
 
 		return this._getMemoizedResult(doEliminateDuplicateRows, session, () => {
-			const resultTable = new Table();
-			resultTable.setSchema(this.getSchema());
+			const resultTable = this._createResultTable(
+				session!,
+				this.getSchema(),
+				this._functionName === '⨯' ? 'cross join' : 'query',
+			);
 			this._executionStart = Date.now();
 
 			Join.calcNestedLoopJoin(
 				doEliminateDuplicateRows,
 				session!,
+				this,
 				this.getChild(),
 				this.getChild2(),
 				resultTable,
@@ -289,8 +293,7 @@ export abstract class Join extends RANodeBinary {
 			// If it is a semi join on bag/multiset mode
 			if ((this._functionName === '⋉' || this._functionName === '⋊') &&
 				doEliminateDuplicateRows !== true) {
-				const newResultTable = new Table();
-				newResultTable.setSchema(this.getSchema());
+				const newResultTable = this._createResultTable(session!, this.getSchema());
 				const orgA = this._isRightJoin ?
 					this.getChild2().getResult(doEliminateDuplicateRows, session) :
 					this.getChild().getResult(doEliminateDuplicateRows, session);
@@ -298,6 +301,7 @@ export abstract class Join extends RANodeBinary {
 				const numRowsA = orgA.getNumRows();
 				const numRowsB = orgB.getNumRows();
 				const numCols = orgA.getNumCols();
+				this._consumeJoinComparisons(session!, numRowsA * numRowsB, Join.getSafetyContext(this));
 				for (let i = 0; i < numRowsA; i++) {
 					const rowA = orgA.getRow(i);
 					for (let j = 0; j < numRowsB; j++) {
@@ -367,6 +371,7 @@ export abstract class Join extends RANodeBinary {
 	static calcNestedLoopJoin(
 		doEliminateDuplicateRows: boolean,
 		session: Session,
+		sourceNode: Join,
 		childA: RANode,
 		childB: RANode,
 		targetTable: Table,
@@ -383,6 +388,13 @@ export abstract class Join extends RANodeBinary {
 		const numRowsB = orgB.getNumRows();
 		const numColsA = orgA.getNumCols();
 		const numColsB = orgB.getNumCols();
+		const joinComparisons = numRowsA * numRowsB;
+
+		sourceNode._consumeJoinComparisons(session, joinComparisons, Join.getSafetyContext(sourceNode));
+
+		if (sourceNode._functionName === '⨯') {
+			sourceNode._ensureSafeIntermediateResultSize(session, joinComparisons, 'cross join');
+		}
 
 		if (isRightJoin === false) { // left (outer) joins
 			let nullArrayRight: null[];
@@ -468,6 +480,28 @@ export abstract class Join extends RANodeBinary {
 					targetTable.addRow(row);
 				}
 			}
+		}
+	}
+
+	private static getSafetyContext(sourceNode: Join) {
+		switch (sourceNode._functionName) {
+			case '⨯':
+				return 'cross join';
+			case '⟕':
+				return 'left outer join';
+			case '⟖':
+				return 'right outer join';
+			case '⟗':
+				return 'full outer join';
+			case '⋉':
+				return 'left semi join';
+			case '⋊':
+				return 'right semi join';
+			case '▷':
+				return 'anti join';
+			case '⨝':
+			default:
+				return sourceNode._joinConditionOptions.type === 'natural' ? 'natural join' : 'join';
 		}
 	}
 

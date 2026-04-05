@@ -63,8 +63,7 @@ export class Projection extends RANodeUnary {
 			}
 
 			const org = this._child.getResult(doEliminateDuplicateRows, session);
-			const res = new Table();
-			res.setSchema(this.getSchema());
+			const res = this._createResultTable(session, this.getSchema());
 
 			const numCols = res.getNumCols();
 			const numRows = org.getNumRows();

@@ -65,13 +65,13 @@ export class FullOuterJoin extends Join {
 		}
 
 		return this._getMemoizedResult(doEliminateDuplicateRows, session, () => {
-			const resultTable = new Table();
-			resultTable.setSchema(this.getSchema());
+			const resultTable = this._createResultTable(session!, this.getSchema());
 
 			// left join
 			Join.calcNestedLoopJoin(
 				doEliminateDuplicateRows,
 				session!,
+				this,
 				this.getChild(), this.getChild2(),
 				resultTable,
 				false,
@@ -85,6 +85,7 @@ export class FullOuterJoin extends Join {
 			Join.calcNestedLoopJoin(
 				doEliminateDuplicateRows,
 				session!,
+				this,
 				this.getChild(), this.getChild2(),
 				resultTable,
 				true,

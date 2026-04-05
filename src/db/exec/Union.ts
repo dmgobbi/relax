@@ -40,10 +40,9 @@ export class Union extends RANodeBinary {
 		}
 
 		return this._getMemoizedResult(doEliminateDuplicateRows, session, () => {
-			const res = new Table();
+			const res = this._createResultTable(session, this._schema!);
 			const orgA = this.getChild().getResult(doEliminateDuplicateRows, session);
 			const orgB = this.getChild2().getResult(doEliminateDuplicateRows, session);
-			res.setSchema(this._schema!);
 
 			// copy
 			res.addRows(orgA.getRows());

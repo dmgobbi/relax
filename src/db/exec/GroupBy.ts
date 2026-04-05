@@ -291,8 +291,7 @@ export class GroupBy extends RANodeUnary {
 
 		return this._getMemoizedResult(doEliminateDuplicateRows, session, () => {
 			const org = this.getChild().getResult(doEliminateDuplicateRows, session);
-			const res = new Table();
-			res.setSchema(this.checked!.schema);
+			const res = this._createResultTable(session, this.checked!.schema);
 
 			const hasGroupCols = this.groupByCols.length > 0;
 			let groupsOfRows; // might be sparsely filled

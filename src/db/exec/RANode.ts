@@ -6,6 +6,7 @@
 
 import { ValueExpr } from 'db/exec/ValueExpr';
 import { CodeInfo } from './CodeInfo';
+import { consumeJoinComparisons, createExecutionSafetyState, ensureIntermediateResultRows, ExecutionSafetyState } from './ExecutionSafety';
 import { ExecutionError } from './ExecutionError';
 import { Schema } from './Schema';
 import { Table } from './Table';
@@ -17,6 +18,7 @@ export interface Warning {
 export interface Session {
 	statement_timestamp: Date,
 	resultCache: Map<string, Table>,
+	executionSafety: ExecutionSafetyState,
 }
 export interface MetaData extends Object {
 	naturalJoinConditions?: ValueExpr[],
@@ -146,11 +148,31 @@ export abstract class RANode {
 			return {
 				statement_timestamp: new Date(),
 				resultCache: new Map<string, Table>(),
+				executionSafety: createExecutionSafetyState(),
 			};
 		}
 		else {
 			return session;
 		}
+	}
+
+	protected _createResultTable(session: Session, schema?: Schema, safetyContext: string = 'query'): Table {
+		const result = new Table();
+		result.setRowLimitHandler((nextNumRows: number) => {
+			this._ensureSafeIntermediateResultSize(session, nextNumRows, safetyContext);
+		});
+		if (schema instanceof Schema) {
+			result.setSchema(schema);
+		}
+		return result;
+	}
+
+	protected _ensureSafeIntermediateResultSize(session: Session, nextNumRows: number, safetyContext: string = 'query') {
+		ensureIntermediateResultRows(session.executionSafety, nextNumRows, safetyContext, this._codeInfo);
+	}
+
+	protected _consumeJoinComparisons(session: Session, additionalComparisons: number, safetyContext: string = 'join') {
+		consumeJoinComparisons(session.executionSafety, additionalComparisons, safetyContext, this._codeInfo);
 	}
 
 	protected _getMemoizedResult(doEliminateDuplicateRows: boolean, session: Session, calculateResult: () => Table): Table {

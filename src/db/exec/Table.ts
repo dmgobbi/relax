@@ -5,18 +5,20 @@
 * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 import { printValue } from 'db/exec/ValueExpr';
-import { Relation } from './Relation';
 import { Data, DataType, Schema } from './Schema';
 
 export type Tuple = Data[];
+export type RowLimitHandler = (nextNumRows: number) => void;
 
 export class Table {
 	_rows: Tuple[];
 	_schema: Schema;
+	_rowLimitHandler: RowLimitHandler | null;
 
 	constructor() {
 		this._rows = [];
 		this._schema = new Schema();
+		this._rowLimitHandler = null;
 	}
 
 	static rowEqualsRow(rowA: Tuple, rowB: Tuple) {
@@ -34,6 +36,10 @@ export class Table {
 	}
 
 	addRow(dataArray: Tuple) {
+		if (this._rowLimitHandler !== null) {
+			this._rowLimitHandler(this._rows.length + 1);
+		}
+
 		this._rows.push(dataArray);
 	}
 
@@ -55,6 +61,11 @@ export class Table {
 
 	getSchema() {
 		return this._schema;
+	}
+
+	setRowLimitHandler(handler: RowLimitHandler | null) {
+		this._rowLimitHandler = handler;
+		return this;
 	}
 
 	getRow(i: number) {
@@ -262,14 +273,16 @@ export class Table {
 		this._rows.sort(compareAll);
 	}
 
-	copy() {
+	copy(rowLimitHandler: RowLimitHandler | null = null) {
 		const res = new Table();
 		res.setSchema(this.getSchema().copy());
+		res.setRowLimitHandler(rowLimitHandler);
 		res.addRows(this.getRows());
 		return res;
 	}
 
 	createRelation(name: string) {
+		const { Relation } = require('./Relation') as typeof import('./Relation');
 		const relation = new Relation(name);
 		relation.setSchema(this.getSchema().copy());
 		relation.addRows(this.getRows());

@@ -109,6 +109,56 @@ function getDivisionReproducerRelations() {
 	};
 }
 
+function withMaxIntermediateRows(limit: number, callback: () => void) {
+	const executionSafetyGlobal = globalThis as typeof globalThis & {
+		__RELAX_EXECUTION_MAX_INTERMEDIATE_ROWS__?: number,
+	};
+	const previousLimit = executionSafetyGlobal.__RELAX_EXECUTION_MAX_INTERMEDIATE_ROWS__;
+	executionSafetyGlobal.__RELAX_EXECUTION_MAX_INTERMEDIATE_ROWS__ = limit;
+
+	try {
+		callback();
+	}
+	finally {
+		if (typeof previousLimit === 'undefined') {
+			delete executionSafetyGlobal.__RELAX_EXECUTION_MAX_INTERMEDIATE_ROWS__;
+		}
+		else {
+			executionSafetyGlobal.__RELAX_EXECUTION_MAX_INTERMEDIATE_ROWS__ = previousLimit;
+		}
+	}
+}
+
+function withMaxJoinComparisons(limit: number, callback: () => void) {
+	const executionSafetyGlobal = globalThis as typeof globalThis & {
+		__RELAX_EXECUTION_MAX_JOIN_COMPARISONS__?: number,
+	};
+	const previousLimit = executionSafetyGlobal.__RELAX_EXECUTION_MAX_JOIN_COMPARISONS__;
+	executionSafetyGlobal.__RELAX_EXECUTION_MAX_JOIN_COMPARISONS__ = limit;
+
+	try {
+		callback();
+	}
+	finally {
+		if (typeof previousLimit === 'undefined') {
+			delete executionSafetyGlobal.__RELAX_EXECUTION_MAX_JOIN_COMPARISONS__;
+		}
+		else {
+			executionSafetyGlobal.__RELAX_EXECUTION_MAX_JOIN_COMPARISONS__ = previousLimit;
+		}
+	}
+}
+
+function createSequentialRelation(name: string, size: number) {
+	let relationText = `{\n\t${name}.x:number\n`;
+	for (let i = 1; i <= size; i++) {
+		relationText += `\n\t${i}`;
+	}
+	relationText += '\n}';
+
+	return new Relation(name, exec_ra(relationText, {}));
+}
+
 QUnit.testStart(function () {
 });
 
@@ -625,6 +675,69 @@ QUnit.test('test shared subtree memoization is scoped per execution', function (
 	assert.equal(shared.numExecutions, 2);
 });
 
+QUnit.test('test cross join within safety limit still works', function (assert) {
+	withMaxIntermediateRows(10, () => {
+		const root = exec_ra(`{
+			a:number
+
+			1
+			2
+		} x {
+			b:string
+
+			'x'
+			'y'
+			'z'
+		}`, {});
+
+		assert.equal(root.getResult().getNumRows(), 6);
+	});
+});
+
+QUnit.test('test cross join aborts when safety limit is exceeded', function (assert) {
+	withMaxIntermediateRows(10, () => {
+		const root = exec_ra(`{
+			a:number
+
+			1
+			2
+			3
+			4
+		} x {
+			b:string
+
+			'x'
+			'y'
+			'z'
+		}`, {});
+
+		assert.throws(
+			() => root.getResult(),
+			(error: Error) => {
+				return error.message.indexOf('safety limit') > -1 &&
+					error.message.indexOf('cross join') > -1;
+			},
+		);
+	});
+});
+
+QUnit.test('test natural join aborts when join comparison safety limit is exceeded', function (assert) {
+	withMaxJoinComparisons(1000000, () => {
+		const root = exec_ra('(A) natural join (B)', {
+			A: createSequentialRelation('A', 1200),
+			B: createSequentialRelation('B', 1200),
+		});
+
+		assert.throws(
+			() => root.getResult(),
+			(error: Error) => {
+				return error.message.indexOf('row comparisons') > -1 &&
+					error.message.indexOf('natural join') > -1;
+			},
+		);
+	});
+});
+
 QUnit.test('test division 0', function (assert) {
 	const { A, B } = getDivisionReproducerRelations();
 
@@ -642,6 +755,24 @@ QUnit.test('test division 0', function (assert) {
 	}`, {});
 
 	assert.deepEqual(root.getResult(), ref.getResult());
+});
+
+QUnit.test('test division aborts when delegated cross join exceeds safety limit', function (assert) {
+	withMaxIntermediateRows(10, () => {
+		const { A, B } = getDivisionReproducerRelations();
+		const root = exec_ra('(A) ÷ (B)', {
+			A,
+			B,
+		});
+
+		assert.throws(
+			() => root.getResult(),
+			(error: Error) => {
+				return error.message.indexOf('safety limit') > -1 &&
+					error.message.indexOf('cross join') > -1;
+			},
+		);
+	});
 });
 
 QUnit.test('test division memoization only lasts for one execution', function (assert) {
