@@ -721,9 +721,20 @@ QUnit.test('test cross join aborts when safety limit is exceeded', function (ass
 	});
 });
 
-QUnit.test('test natural join aborts when join comparison safety limit is exceeded', function (assert) {
+QUnit.test('test natural join stays within comparison safety limit by using join keys', function (assert) {
 	withMaxJoinComparisons(1000000, () => {
 		const root = exec_ra('(A) natural join (B)', {
+			A: createSequentialRelation('A', 1200),
+			B: createSequentialRelation('B', 1200),
+		});
+
+		assert.equal(root.getResult().getNumRows(), 1200);
+	});
+});
+
+QUnit.test('test theta join still aborts when join comparison safety limit is exceeded', function (assert) {
+	withMaxJoinComparisons(1000000, () => {
+		const root = exec_ra('(A) join A.x = B.x (B)', {
 			A: createSequentialRelation('A', 1200),
 			B: createSequentialRelation('B', 1200),
 		});
@@ -732,7 +743,7 @@ QUnit.test('test natural join aborts when join comparison safety limit is exceed
 			() => root.getResult(),
 			(error: Error) => {
 				return error.message.indexOf('row comparisons') > -1 &&
-					error.message.indexOf('natural join') > -1;
+					error.message.indexOf('join') > -1;
 			},
 		);
 	});

@@ -24,6 +24,11 @@ export type JoinCondition = {
 	restrictToColumns: string[] | null,
 };
 
+type NaturalJoinColumnIndexPair = {
+	indexA: number,
+	indexB: number,
+};
+
 /**
  * relational algebra Join operator
  *
@@ -46,6 +51,7 @@ export abstract class Join extends RANodeBinary {
 	_schema: Schema | null = null;
 	_rowCreatorMatched: null | ((rowA: Data[], rowB: Data[]) => Data[]) = null;
 	_rowCreatorNotMatched: null | ((rowA: Data[], rowB: Data[]) => Data[]) = null; // used for outer joins
+	_naturalJoinColumnIndexPairs: NaturalJoinColumnIndexPair[] = [];
 	_executionStart: any;
 	_executedEnd: any;
 
@@ -86,6 +92,7 @@ export abstract class Join extends RANodeBinary {
 
 		if (this._joinConditionOptions.type === 'natural') {
 			const { restrictToColumns } = this._joinConditionOptions;
+			this._naturalJoinColumnIndexPairs = Join.getNaturalJoinColumnIndexPairs(schemaA, schemaB, restrictToColumns);
 
 			// check if columns of using clause appear in both schemas
 			if (restrictToColumns !== null) {
@@ -102,6 +109,7 @@ export abstract class Join extends RANodeBinary {
 		}
 		else {
 			// theta joins
+			this._naturalJoinColumnIndexPairs = [];
 			this._joinConditionBooleanExpr = this._joinConditionOptions.joinExpression;
 		}
 
@@ -271,19 +279,36 @@ export abstract class Join extends RANodeBinary {
 			);
 			this._executionStart = Date.now();
 
-			Join.calcNestedLoopJoin(
-				doEliminateDuplicateRows,
-				session!,
-				this,
-				this.getChild(),
-				this.getChild2(),
-				resultTable,
-				this._isRightJoin,
-				this._isAntiJoin,
-				this._joinConditionEvaluator!,
-				this._rowCreatorMatched,
-				this._rowCreatorNotMatched,
-			);
+			if (this._joinConditionOptions.type === 'natural' && this._naturalJoinColumnIndexPairs.length > 0) {
+				Join.calcNaturalJoinByKey(
+					doEliminateDuplicateRows,
+					session!,
+					this,
+					this.getChild(),
+					this.getChild2(),
+					resultTable,
+					this._isRightJoin,
+					this._isAntiJoin,
+					this._rowCreatorMatched,
+					this._rowCreatorNotMatched,
+					this._naturalJoinColumnIndexPairs,
+				);
+			}
+			else {
+				Join.calcNestedLoopJoin(
+					doEliminateDuplicateRows,
+					session!,
+					this,
+					this.getChild(),
+					this.getChild2(),
+					resultTable,
+					this._isRightJoin,
+					this._isAntiJoin,
+					this._joinConditionEvaluator!,
+					this._rowCreatorMatched,
+					this._rowCreatorNotMatched,
+				);
+			}
 
 			// can be omitted if join is known to produce no new duplicates (e.g semi join) 
 			if (doEliminateDuplicateRows === true) {
@@ -483,6 +508,116 @@ export abstract class Join extends RANodeBinary {
 		}
 	}
 
+	static calcNaturalJoinByKey(
+		doEliminateDuplicateRows: boolean,
+		session: Session,
+		sourceNode: Join,
+		childA: RANode,
+		childB: RANode,
+		targetTable: Table,
+		isRightJoin: boolean,
+		isAntiJoin: boolean,
+		createRowToAddIfMatched: null | ((rowA: Data[], rowB: Data[]) => Data[]),
+		createRowToAddIfNOTMatched: null | ((rowA: Data[], rowB: Data[]) => Data[]),
+		joinColumnIndexPairs: NaturalJoinColumnIndexPair[],
+	): void {
+
+		const orgA = childA.getResult(doEliminateDuplicateRows, session);
+		const orgB = childB.getResult(doEliminateDuplicateRows, session);
+		const numRowsA = orgA.getNumRows();
+		const numRowsB = orgB.getNumRows();
+		const numColsA = orgA.getNumCols();
+		const numColsB = orgB.getNumCols();
+		const joinColumnsA = joinColumnIndexPairs.map(pair => pair.indexA);
+		const joinColumnsB = joinColumnIndexPairs.map(pair => pair.indexB);
+
+		if (isRightJoin === false) {
+			const rowsByJoinKeyB = Join.groupRowsByJoinKey(orgB, joinColumnsB);
+			let nullArrayRight: null[];
+			if (createRowToAddIfNOTMatched !== null) {
+				nullArrayRight = Join.createNullArray(targetTable.getSchema().getSize() - numColsA);
+			}
+
+			const antiJoinDict: { [index: number]: boolean } = {};
+			for (let i = 0; i < numRowsA; i++) {
+				const rowA = orgA.getRow(i);
+				let match = false;
+				if (isAntiJoin) {
+					antiJoinDict[i] = false;
+				}
+
+				const matchingRowsB = Join.getRowsForJoinKey(rowsByJoinKeyB, rowA, joinColumnsA);
+				sourceNode._consumeJoinComparisons(session, matchingRowsB.length, Join.getSafetyContext(sourceNode));
+
+				for (let j = 0; j < matchingRowsB.length; j++) {
+					const rowB = matchingRowsB[j];
+					match = true;
+					if (createRowToAddIfMatched !== null) {
+						const row = createRowToAddIfMatched(rowA, rowB);
+						if (isAntiJoin) {
+							antiJoinDict[i] = false;
+						}
+						else {
+							targetTable.addRow(row);
+						}
+					}
+				}
+
+				if (match === false && createRowToAddIfNOTMatched !== null) {
+					const row = createRowToAddIfNOTMatched(rowA, nullArrayRight!);
+					if (row === null) {
+						continue;
+					}
+					if (isAntiJoin) {
+						antiJoinDict[i] = true;
+					}
+					else {
+						targetTable.addRow(row);
+					}
+				}
+			}
+
+			if (isAntiJoin) {
+				for (let i = 0; i < numRowsA; i++) {
+					if (antiJoinDict[i] === true) {
+						targetTable.addRow(orgA.getRow(i));
+					}
+				}
+			}
+		}
+		else {
+			const rowsByJoinKeyA = Join.groupRowsByJoinKey(orgA, joinColumnsA);
+			let nullArrayLeft: null[];
+			if (createRowToAddIfNOTMatched !== null) {
+				nullArrayLeft = Join.createNullArray(targetTable.getSchema().getSize() - numColsB);
+			}
+
+			for (let i = 0; i < numRowsB; i++) {
+				const rowB = orgB.getRow(i);
+				let match = false;
+				const matchingRowsA = Join.getRowsForJoinKey(rowsByJoinKeyA, rowB, joinColumnsB);
+				sourceNode._consumeJoinComparisons(session, matchingRowsA.length, Join.getSafetyContext(sourceNode));
+
+				for (let j = 0; j < matchingRowsA.length; j++) {
+					const rowA = matchingRowsA[j];
+					match = true;
+					if (createRowToAddIfMatched !== null) {
+						const row = createRowToAddIfMatched(rowA, rowB);
+						targetTable.addRow(row);
+					}
+				}
+
+				if (match === false && createRowToAddIfNOTMatched !== null) {
+					const row = createRowToAddIfNOTMatched(nullArrayLeft!, rowB);
+					if (row === null) {
+						continue;
+					}
+					targetTable.addRow(row);
+				}
+			}
+		}
+	}
+
 	private static getSafetyContext(sourceNode: Join) {
 		switch (sourceNode._functionName) {
 			case '⨯':
@@ -531,40 +666,98 @@ export abstract class Join extends RANodeBinary {
 	}
 
 	static getNaturalJoinConditionArray(schemaA: Schema, schemaB: Schema, restrictToColumns: string[] | null = null) {
-		const numColsA = schemaA.getSize();
+		const pairs = Join.getNaturalJoinColumnIndexPairs(schemaA, schemaB, restrictToColumns);
 		const conditions: ValueExpr.ValueExpr[] = [];
-		const hasDuplicateCols = Join.checkForDuplicates(schemaA) || Join.checkForDuplicates(schemaB);
-		
+		const numColsA = schemaA.getSize();
 
-		// find columns with the same name in schemaA and schemaB
+		for (let i = 0; i < pairs.length; i++) {
+			const pair = pairs[i];
+			const a = schemaA.getColumn(pair.indexA);
+			const b = schemaB.getColumn(pair.indexB);
+
+			// the column indices are set manually
+			const equals = new ValueExpr.ValueExprGeneric('boolean', '=', [
+				new ValueExpr.ValueExprColumnValue(a.getName(), a.getRelAlias(), pair.indexA),
+				new ValueExpr.ValueExprColumnValue(b.getName(), b.getRelAlias(), numColsA + pair.indexB),
+			]);
+			conditions.push(equals);
+		}
+		return conditions;
+	}
+
+	static getNaturalJoinColumnIndexPairs(schemaA: Schema, schemaB: Schema, restrictToColumns: string[] | null = null) {
+		const numColsA = schemaA.getSize();
+		const pairs: NaturalJoinColumnIndexPair[] = [];
+		const hasDuplicateCols = Join.checkForDuplicates(schemaA) || Join.checkForDuplicates(schemaB);
+
 		for (let i = 0; i < numColsA; i++) {
 			const a = schemaA.getColumn(i);
 			if (restrictToColumns !== null && restrictToColumns.indexOf(a.getName() + '') === -1) {
-				// skip all but certain columns (for joins with USING())
 				continue;
 			}
-			
+
 			let indices = [];
 			if (hasDuplicateCols) {
 				indices = schemaB.getColumnIndexArray(a.getName(), a.getRelAlias());
-			} else {
+			}
+			else {
 				indices = schemaB.getColumnIndexArray(a.getName(), null);
 			}
 
 			for (let j = 0; j < indices.length; j++) {
-				const index = indices[j];
-
-				const b = schemaB.getColumn(index);
-
-				// the column indices are set manually
-				const equals = new ValueExpr.ValueExprGeneric('boolean', '=', [
-					new ValueExpr.ValueExprColumnValue(a.getName(), a.getRelAlias(), i),
-					new ValueExpr.ValueExprColumnValue(b.getName(), b.getRelAlias(), numColsA + index),
-				]);
-				conditions.push(equals);
+				pairs.push({
+					indexA: i,
+					indexB: indices[j],
+				});
 			}
 		}
-		return conditions;
+
+		return pairs;
+	}
+
+	private static groupRowsByJoinKey(table: Table, columnIndices: number[]) {
+		const rowsByJoinKey = new Map<string, Data[][]>();
+		const numRows = table.getNumRows();
+
+		for (let i = 0; i < numRows; i++) {
+			const row = table.getRow(i);
+			const joinKey = Join.createJoinKey(row, columnIndices);
+			if (joinKey === null) {
+				continue;
+			}
+
+			let bucket = rowsByJoinKey.get(joinKey);
+			if (bucket === undefined) {
+				bucket = [];
+				rowsByJoinKey.set(joinKey, bucket);
+			}
+			bucket.push(row);
+		}
+
+		return rowsByJoinKey;
+	}
+
+	private static getRowsForJoinKey(rowsByJoinKey: Map<string, Data[][]>, row: Data[], columnIndices: number[]) {
+		const joinKey = Join.createJoinKey(row, columnIndices);
+		if (joinKey === null) {
+			return [];
+		}
+
+		const bucket = rowsByJoinKey.get(joinKey);
+		return bucket === undefined ? [] : bucket;
+	}
+
+	private static createJoinKey(row: Data[], columnIndices: number[]) {
+		const joinKeyValues = new Array<Data>(columnIndices.length);
+		for (let i = 0; i < columnIndices.length; i++) {
+			const value = row[columnIndices[i]];
+			if (value === null) {
+				return null;
+			}
+			joinKeyValues[i] = value;
+		}
+
+		return JSON.stringify(joinKeyValues);
 	}
 
 	static getNaturalJoinCondition(schemaA: Schema, schemaB: Schema, restrictToColumns: string[] | null = null): ValueExpr.ValueExpr {
